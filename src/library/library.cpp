@@ -146,6 +146,22 @@ Library::Library(
             &BrowseFeature::slotLibraryScanFinished);
     addFeature(m_pBrowseFeature);
 
+    // USB drives, mounted by the box's own hook into the numbered slots
+    // /media/USB1../media/USB4 (see /usr/local/bin/djbox-usb-mount.sh). A
+    // separate feature so the row sits beside Tracks rather than three
+    // levels down inside Computer. The slots are always listed, mounted or
+    // not, because the hook only creates one when it first uses it.
+    QStringList usbSlots;
+    for (int slot = 1; slot <= 4; ++slot) {
+        usbSlots.append(QStringLiteral("/media/USB%1").arg(slot));
+    }
+    m_pUsbBrowseFeature = new BrowseFeature(this,
+            m_pConfig,
+            pRecordingManager,
+            tr("USB"),
+            usbSlots);
+    addFeature(m_pUsbBrowseFeature);
+
     addFeature(new RecordingFeature(this, m_pConfig, pRecordingManager));
 
     addFeature(new SetlogFeature(this, UserSettingsPointer(m_pConfig)));
@@ -313,6 +329,11 @@ void Library::stopPendingTasks() {
         m_pAnalysisFeature->stopAnalysis();
     }
     m_pBrowseFeature->releaseBrowseThread();
+    if (m_pUsbBrowseFeature) {
+        // BrowseTableModel::releaseBrowseThread requires every reference
+        // reset before the library is destructed, not just the first.
+        m_pUsbBrowseFeature->releaseBrowseThread();
+    }
 }
 
 void Library::bindSearchboxWidget(WSearchLineEdit* pSearchboxWidget) {

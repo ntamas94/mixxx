@@ -191,6 +191,7 @@ class Library: public QObject {
     CrateFeature* m_pCrateFeature;
     AnalysisFeature* m_pAnalysisFeature;
     BrowseFeature* m_pBrowseFeature;
+    BrowseFeature* m_pUsbBrowseFeature{};
     QFont m_trackTableFont;
     int m_iTrackTableRowHeight;
     bool m_editMetadataSelectedClick;

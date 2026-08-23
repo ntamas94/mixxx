@@ -42,7 +42,9 @@ const QStringList removableDriveRootPaths() {
 BrowseFeature::BrowseFeature(
         Library* pLibrary,
         UserSettingsPointer pConfig,
-        RecordingManager* pRecordingManager)
+        RecordingManager* pRecordingManager,
+        const QString& customTitle,
+        const QStringList& customRootPaths)
         : LibraryFeature(pLibrary, pConfig, QString("computer")),
           m_pTrackCollection(
                   pLibrary->trackCollectionManager()->internalCollection()),
@@ -51,7 +53,9 @@ BrowseFeature::BrowseFeature(
                   pRecordingManager,
                   "mixxx.db.model.browse"),
           m_proxyModel(&m_browseModel, true),
-          m_pSidebarModel(new FolderTreeModel(this)) {
+          m_pSidebarModel(new FolderTreeModel(this)),
+          m_customTitle(customTitle),
+          m_customRootPaths(customRootPaths) {
     connect(&m_browseModel,
             &BrowseTableModel::saveModelState,
             this,
@@ -107,6 +111,19 @@ BrowseFeature::BrowseFeature(
 
     // The invisible root item of the child model
     std::unique_ptr<TreeItem> pRootItem = TreeItem::newRoot(this);
+
+    if (hasCustomRoot()) {
+        // Fixed slots, listed lazily like any other directory: whatever is
+        // mounted in one when the row is opened is what shows up.
+        for (QString path : m_customRootPaths) {
+            if (!path.endsWith('/')) {
+                path.append('/');
+            }
+            pRootItem->appendChild(extractNameFromPath(path), path);
+        }
+        m_pSidebarModel->setRootItem(std::move(pRootItem));
+        return;
+    }
 
     m_pQuickLinkItem = pRootItem->appendChild(tr("Quick Links"), QUICK_LINK_NODE);
 
@@ -174,10 +191,23 @@ BrowseFeature::~BrowseFeature() {
 }
 
 QVariant BrowseFeature::title() {
+    if (hasCustomRoot()) {
+        return QVariant(m_customTitle);
+    }
     return QVariant(tr("Computer"));
 }
 
+QString BrowseFeature::viewName() const {
+    return hasCustomRoot()
+            ? kViewName + QStringLiteral("_") + m_customTitle
+            : kViewName;
+}
+
 void BrowseFeature::slotAddQuickLink() {
+    if (hasCustomRoot()) {
+        return;
+    }
+
     const QString path = getLastRightClickedPath();
     if (path.isEmpty()) {
         return;
@@ -235,6 +265,10 @@ void BrowseFeature::slotLibraryScanFinished() {
 }
 
 void BrowseFeature::slotRemoveQuickLink() {
+    if (hasCustomRoot()) {
+        return;
+    }
+
     const QString path = getLastRightClickedPath();
     if (path.isEmpty()) {
         return;
@@ -275,7 +309,7 @@ void BrowseFeature::bindLibraryWidget(WLibrary* libraryWidget,
     Q_UNUSED(keyboard);
     WLibraryTextBrowser* edit = new WLibraryTextBrowser(libraryWidget);
     edit->setHtml(getRootViewHtml());
-    libraryWidget->registerView(kViewName, edit);
+    libraryWidget->registerView(viewName(), edit);
 }
 
 void BrowseFeature::bindSidebarWidget(WLibrarySidebar* pSidebarWidget) {
@@ -284,7 +318,7 @@ void BrowseFeature::bindSidebarWidget(WLibrarySidebar* pSidebarWidget) {
 }
 
 void BrowseFeature::activate() {
-    emit switchToView(kViewName);
+    emit switchToView(viewName());
     emit disableSearch();
     emit enableCoverArtDisplay(false);
 }
@@ -353,12 +387,14 @@ void BrowseFeature::onRightClickChild(const QPoint& globalPos, const QModelIndex
 
     QMenu menu(m_pSidebarWidget);
 
-    if (pItem->parent()->getData().toString() == QUICK_LINK_NODE ||
-            m_quickLinkList.contains(path)) {
-        // This is a QuickLink or path is in the Quick Link list
-        menu.addAction(m_pRemoveQuickLinkAction);
-    } else {
-        menu.addAction(m_pAddQuickLinkAction);
+    if (!hasCustomRoot()) {
+        if (pItem->parent()->getData().toString() == QUICK_LINK_NODE ||
+                m_quickLinkList.contains(path)) {
+            // This is a QuickLink or path is in the Quick Link list
+            menu.addAction(m_pRemoveQuickLinkAction);
+        } else {
+            menu.addAction(m_pAddQuickLinkAction);
+        }
     }
 
     // TODO Check if we already watch this path or a parent and don't show or
@@ -514,6 +550,14 @@ std::vector<std::unique_ptr<TreeItem>> BrowseFeature::getChildDirectoryItems(
 }
 
 QString BrowseFeature::getRootViewHtml() const {
+    if (hasCustomRoot()) {
+        QString page;
+        page.append(QString("<h2>%1</h2>").arg(m_customTitle));
+        page.append(QString("<p>%1</p>")
+                            .arg(tr("Tracks on drives plugged into this box. "
+                                    "Open a slot to see what is mounted in it.")));
+        return page;
+    }
     const QString browseTitle = tr("Computer");
     const QString browseSummary = tr(
             "\"Computer\" lets you navigate, view, and load tracks"

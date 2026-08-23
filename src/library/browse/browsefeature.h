@@ -26,7 +26,9 @@ class BrowseFeature : public LibraryFeature {
   public:
     BrowseFeature(Library* pLibrary,
             UserSettingsPointer pConfig,
-            RecordingManager* pRecordingManager);
+            RecordingManager* pRecordingManager,
+            const QString& customTitle = QString(),
+            const QStringList& customRootPaths = QStringList());
     ~BrowseFeature() override;
 
     QVariant title() override;
@@ -38,6 +40,13 @@ class BrowseFeature : public LibraryFeature {
     TreeItemModel* sidebarModel() const override;
 
     void releaseBrowseThread();
+
+    // Set when this instance stands for a fixed set of directories rather
+    // than the whole machine: the sidebar shows just those, and the quick
+    // link machinery is left alone.
+    bool hasCustomRoot() const {
+        return !m_customRootPaths.isEmpty();
+    }
 
   public slots:
     void slotAddQuickLink();
@@ -58,6 +67,10 @@ class BrowseFeature : public LibraryFeature {
     void scanLibrary();
 
   private:
+    // Both instances would otherwise register their landing page under the
+    // same name, and WLibrary::registerView refuses the duplicate.
+    QString viewName() const;
+
     QString getRootViewHtml() const;
     QString extractNameFromPath(const QString& spath);
     QStringList getDefaultQuickLinks() const;
@@ -71,6 +84,8 @@ class BrowseFeature : public LibraryFeature {
     BrowseTableModel m_browseModel;
     ProxyTrackModel m_proxyModel;
     FolderTreeModel* m_pSidebarModel;
+    QString m_customTitle;
+    QStringList m_customRootPaths;
     QAction* m_pAddQuickLinkAction;
     QAction* m_pRemoveQuickLinkAction;
     QAction* m_pAddtoLibraryAction;
@@ -79,7 +94,7 @@ class BrowseFeature : public LibraryFeature {
     // Caution: Make sure this is reset whenever the library tree is updated,
     // so that the internalPointer() does not become dangling
     QModelIndex m_lastRightClickedIndex;
-    TreeItem* m_pQuickLinkItem;
+    TreeItem* m_pQuickLinkItem{};
     QStringList m_quickLinkList;
     QPointer<WLibrarySidebar> m_pSidebarWidget;
 };
