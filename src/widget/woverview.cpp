@@ -708,7 +708,6 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
         drawAxis(&painter);
         drawWaveformPixmap(&painter);
         drawPlayedOverlay(&painter);
-        drawMinuteMarkers(&painter);
         drawPlayPosition(&painter);
         drawEndOfTrackFrame(&painter);
         drawAnalyzerProgress(&painter);
@@ -721,6 +720,7 @@ void WOverview::paintEvent(QPaintEvent* pEvent) {
 
             drawRangeMarks(&painter, offset, gain);
             drawMarks(&painter, offset, gain);
+            drawMinuteMarkers(&painter);
             drawPickupPosition(&painter);
             drawTimeRuler(&painter);
             drawMarkLabels(&painter, offset, gain);
@@ -813,42 +813,101 @@ void WOverview::drawMinuteMarkers(QPainter* pPainter) {
         return;
     }
 
+    // No preference gate here: each branch applies its own, and the
+    // horizontal one has to paint the background strip before it.
+    PainterScope painterScope(pPainter);
+    pPainter->setOpacity(1.0);
+
+    if (m_orientation != Qt::Horizontal) {
+        // Upstream's own ruler, kept for vertical overviews: an unlabelled
+        // tick every sixty seconds counting up from the start. No skin here
+        // uses a vertical overview, so this is carried rather than tested.
+        if (!static_cast<bool>(m_pMinuteMarkersControl->get())) {
+            return;
+        }
+        if (m_pRateRatioControl->get() == 0) {
+            return;
+        }
+        // Faster than track->getDuration() and already has playback speed ratio
+        // compensated for
+        const double trackSeconds = samplePositionToSeconds(getTrackSamples());
+
+        QLineF line;
+        pPainter->setPen(QPen(m_axesColor, m_scaleFactor));
+        const double overviewHeight = width();
+        const double markerHeight = overviewHeight * 0.08;
+        const double lowerMarkerYPos = overviewHeight * 0.92;
+        const int iWidth = height();
+        for (double currentMarkerSeconds = 60; currentMarkerSeconds < trackSeconds;
+                currentMarkerSeconds += 60) {
+            const double pos = currentMarkerSeconds / trackSeconds * iWidth;
+            // untested, best effort basis
+            line.setLine(0.0, pos, markerHeight, pos);
+            pPainter->drawLine(line);
+            line.setLine(lowerMarkerYPos, pos, overviewHeight, pos);
+            pPainter->drawLine(line);
+        }
+        return;
+    }
+
+    // Horizontal: an XDJ-style minute scale instead. Ticks and -M:00 labels
+    // measured backwards from the end of the track, because what a DJ reads
+    // off a card is how long is left, not how long has gone. Upstream's
+    // version cannot serve here anyway: it paints with m_axesColor, which
+    // this skin sets to #00000000 so that drawAxis leaves no centre line,
+    // and its lower ticks sit at 92-100% of widget height, below the height
+    // the container clips the widget to.
+    const double trackSamples = getTrackSamples();
+    const double rate = m_trackSampleRateControl.get() *
+            mixxx::kEngineChannelOutputCount;
+    if (trackSamples <= 0 || rate <= 0) {
+        return;
+    }
+    const double durationSeconds = trackSamples / rate;
+
+    // paintEvent's own mapping from samples to x, recomputed here because
+    // drawMinuteMarkers takes no arguments.
+    const float offset = 1.0f;
+    const auto gain = static_cast<CSAMPLE_GAIN>(length() - 2) /
+            static_cast<CSAMPLE_GAIN>(trackSamples);
+
+    // The Pioneered skin gives the Overview widget a height larger than its
+    // container so the widget is clipped to its upper half for the one-sided
+    // XZ look -- 188 into 116, or 236 into 140. Both work out at half the
+    // widget plus this 22 px band, so the strip is exactly the visible
+    // remainder below the centre line, and filling it is what hides the
+    // mirrored lower lobe of the waveform. That is skin geometry rather than
+    // decoration, so it happens whether or not the ruler is switched on.
+    const int mid = breadth() / 2;
+    const int band = static_cast<int>(22 * m_scaleFactor);
+    pPainter->fillRect(QRectF(0, mid, length(), band), m_backgroundColor);
+
     if (!static_cast<bool>(m_pMinuteMarkersControl->get())) {
         return;
     }
 
-    if (m_pRateRatioControl->get() == 0) {
-        return;
+    QFont font = pPainter->font();
+    font.setPixelSize(static_cast<int>(18 * m_scaleFactor));
+    font.setBold(true);
+    pPainter->setFont(font);
+
+    // Thin out the labels when the minutes get closer than ~45 px.
+    const double minutePixels = gain * 60.0 * rate;
+    int step = 1;
+    while (step * minutePixels < 45.0 * m_scaleFactor && step < 16) {
+        step *= 2;
     }
 
-    // Faster than track->getDuration() and already has playback speed ratio compensated for
-    const double trackSeconds = samplePositionToSeconds(getTrackSamples());
-
-    QLineF line;
-    pPainter->setPen(QPen(m_axesColor, m_scaleFactor));
-    pPainter->setOpacity(1.0);
-
-    const double overviewHeight = m_orientation == Qt::Horizontal ? height() : width();
-    const double markerHeight = overviewHeight * 0.08;
-    const double lowerMarkerYPos = overviewHeight * 0.92;
-    double currentMarkerXPos;
-    const int iWidth = m_orientation == Qt::Horizontal ? width() : height();
-    for (double currentMarkerSeconds = 60; currentMarkerSeconds < trackSeconds;
-            currentMarkerSeconds += 60) {
-        currentMarkerXPos = currentMarkerSeconds / trackSeconds * iWidth;
-
-        if (m_orientation == Qt::Horizontal) {
-            line.setLine(currentMarkerXPos, 0.0, currentMarkerXPos, markerHeight);
-            pPainter->drawLine(line);
-            line.setLine(currentMarkerXPos, lowerMarkerYPos, currentMarkerXPos, overviewHeight);
-            pPainter->drawLine(line);
-        } else {
-            // untested, best effort basis
-            line.setLine(0.0, currentMarkerXPos, markerHeight, currentMarkerXPos);
-            pPainter->drawLine(line);
-            line.setLine(lowerMarkerYPos, currentMarkerXPos, overviewHeight, currentMarkerXPos);
-            pPainter->drawLine(line);
-        }
+    for (int minute = step; minute * 60.0 < durationSeconds; minute += step) {
+        const double posSample = (durationSeconds - minute * 60.0) * rate;
+        const float x = offset + static_cast<float>(gain * posSample);
+        pPainter->setPen(QPen(QColor(255, 255, 255, 200), m_scaleFactor));
+        pPainter->drawLine(QPointF(x, mid), QPointF(x, mid + band));
+        const QString label = QStringLiteral("-%1:00").arg(minute);
+        pPainter->setPen(QPen(QColor(255, 255, 255, 230), m_scaleFactor));
+        pPainter->drawText(
+                QPointF(x + 3 * m_scaleFactor, mid + band - 3 * m_scaleFactor),
+                label);
     }
 }
 
