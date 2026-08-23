@@ -89,20 +89,35 @@ void drawWaveformPartRGB(
         startVal = *start;
     }
 
-    const QColor lowColor = signalColors.getRgbLowColor();
-    const QColor midColor = signalColors.getRgbMidColor();
-    const QColor highColor = signalColors.getRgbHighColor();
     QColor color;
 
-    float lowColor_r = 0, lowColor_g = 0, lowColor_b = 0,
-          midColor_r = 0, midColor_g = 0, midColor_b = 0,
-          highColor_r = 0, highColor_g = 0, highColor_b = 0,
-          all = 0, low = 0, mid = 0, high = 0,
-          red = 0, green = 0, blue = 0, max = 0;
+    // Same mixer as the scrolling waveform, same numbers out of the skin, so
+    // the card overview and the big waveform cannot drift apart.
+    const WaveformBand3& band3 = signalColors.getBand3();
 
-    getRgbF(lowColor, &lowColor_r, &lowColor_g, &lowColor_b);
-    getRgbF(midColor, &midColor_r, &midColor_g, &midColor_b);
-    getRgbF(highColor, &highColor_r, &highColor_g, &highColor_b);
+    // One half-column's three band levels and its height.
+    const auto bands = [&](int index,
+                               float* pLow,
+                               float* pMid,
+                               float* pHigh,
+                               float* pLength) {
+        *pLow = band3.low(pWaveform->getLow(index));
+        *pMid = band3.mid(pWaveform->getMid(index));
+        *pHigh = band3.high(pWaveform->getHigh(index));
+        *pLength = band3.heightFromBands()
+                ? band3.bandHeight(*pLow, *pMid, *pHigh) * 255.0f
+                : static_cast<float>(pWaveform->getAll(index));
+    };
+    // False for a column with nothing in it, which the caller skips.
+    const auto setColor = [&](float low, float mid, float high) {
+        float red = 0.f, green = 0.f, blue = 0.f;
+        band3.color(low, mid, high, &red, &green, &blue);
+        if (red <= 0.f && green <= 0.f && blue <= 0.f) {
+            return false;
+        }
+        color.setRgbF(red, green, blue);
+        return true;
+    };
 
     if (mono) {
         // Mono means we're going to paint from bottom to top with l+r.
@@ -113,66 +128,35 @@ void drawWaveformPartRGB(
         // flip y-axis
         pPainter->scale(1, -1);
         for (int i = startVal, x = startVal / 2; i < end; i += 2, ++x) {
-            // Left
-            all = pWaveform->getAll(i) + pWaveform->getAll(i + 1);
-            low = pWaveform->getLow(i) + pWaveform->getLow(i + 1);
-            mid = pWaveform->getMid(i) + pWaveform->getMid(i + 1);
-            high = pWaveform->getHigh(i) + pWaveform->getHigh(i + 1);
-
-            red = low * lowColor_r + mid * midColor_r + high * highColor_r;
-            green = low * lowColor_g + mid * midColor_g + high * highColor_g;
-            blue = low * lowColor_b + mid * midColor_b + high * highColor_b;
-            // Normalize
-            max = math_max3(red, green, blue);
-            // Draw
-            if (max > 0.0) {
-                color.setRgbF(static_cast<float>(low / max),
-                        static_cast<float>(mid / max),
-                        static_cast<float>(high / max));
-                pPainter->setPen(color);
-                pPainter->drawLine(x, static_cast<int>(all), x, 0);
+            // Both channels stacked into one upward column: colour from the
+            // two together, height from the sum, so the 0..510 range this
+            // path draws into is preserved.
+            float lowL, midL, highL, lengthL;
+            float lowR, midR, highR, lengthR;
+            bands(i, &lowL, &midL, &highL, &lengthL);
+            bands(i + 1, &lowR, &midR, &highR, &lengthR);
+            const float length = lengthL + lengthR;
+            if (length <= 0.f || !setColor(lowL + lowR, midL + midR, highL + highR)) {
+                continue;
             }
+            pPainter->setPen(color);
+            pPainter->drawLine(x, static_cast<int>(length), x, 0);
         }
     } else { // stereo
         for (int i = startVal, x = startVal / 2; i < end; i += 2, ++x) {
-            // Left
-            all = pWaveform->getAll(i);
-            low = pWaveform->getLow(i);
-            mid = pWaveform->getMid(i);
-            high = pWaveform->getHigh(i);
-
-            red = low * lowColor_r + mid * midColor_r + high * highColor_r;
-            green = low * lowColor_g + mid * midColor_g + high * highColor_g;
-            blue = low * lowColor_b + mid * midColor_b + high * highColor_b;
-            // Normalize
-            max = math_max3(red, green, blue);
-            // Draw
-            if (max > 0.0) {
-                color.setRgbF(static_cast<float>(low / max),
-                        static_cast<float>(mid / max),
-                        static_cast<float>(high / max));
+            // One half-column per channel, each with its own colour.
+            for (int chn = 0; chn < 2; ++chn) {
+                float low, mid, high, length;
+                bands(i + chn, &low, &mid, &high, &length);
+                if (length <= 0.f || !setColor(low, mid, high)) {
+                    continue;
+                }
                 pPainter->setPen(color);
-                pPainter->drawLine(x, static_cast<int>(-all), x, 0);
-            }
-
-            // Right
-            all = pWaveform->getAll(i + 1);
-            low = pWaveform->getLow(i + 1);
-            mid = pWaveform->getMid(i + 1);
-            high = pWaveform->getHigh(i + 1);
-
-            red = low * lowColor_r + mid * midColor_r + high * highColor_r;
-            green = low * lowColor_g + mid * midColor_g + high * highColor_g;
-            blue = low * lowColor_b + mid * midColor_b + high * highColor_b;
-
-            max = math_max3(red, green, blue);
-
-            if (max > 0.0) {
-                color.setRgbF(static_cast<float>(low / max),
-                        static_cast<float>(mid / max),
-                        static_cast<float>(high / max));
-                pPainter->setPen(color);
-                pPainter->drawLine(x, 0, x, static_cast<int>(all));
+                if (chn == 0) {
+                    pPainter->drawLine(x, static_cast<int>(-length), x, 0);
+                } else {
+                    pPainter->drawLine(x, 0, x, static_cast<int>(length));
+                }
             }
         }
     }
@@ -193,6 +177,15 @@ void drawWaveformPartLMH(
     const QColor lowColor = signalColors.getLowColor();
     const QColor midColor = signalColors.getMidColor();
     const QColor highColor = signalColors.getHighColor();
+    // WOverview reads no per-band gain in stock Mixxx, so all three bands
+    // are drawn at equal gain and the high band -- which covers most of the
+    // lane -- buries the other two. The mixer's tables are what turn a pale
+    // block back into a waveform. Colours stay the LMH pens; only the
+    // levels change.
+    const WaveformBand3& band3 = signalColors.getBand3();
+    const auto extent = [](float level) {
+        return static_cast<int>(math_clamp(level, 0.0f, 1.0f) * 255.0f + 0.5f);
+    };
     int startVal = 0;
     if (start) {
         startVal = *start;
@@ -211,30 +204,39 @@ void drawWaveformPartLMH(
             x = i / 2;
             pPainter->setPen(lowColor);
             pPainter->drawLine(QPoint(x, 0),
-                    QPoint(x, pWaveform->getLow(i) + pWaveform->getLow(i + 1)));
+                    QPoint(x,
+                            extent(band3.low(pWaveform->getLow(i))) +
+                                    extent(band3.low(pWaveform->getLow(i + 1)))));
 
             pPainter->setPen(midColor);
             pPainter->drawLine(QPoint(x, 0),
-                    QPoint(x, pWaveform->getMid(i) + pWaveform->getMid(i + 1)));
+                    QPoint(x,
+                            extent(band3.mid(pWaveform->getMid(i))) +
+                                    extent(band3.mid(pWaveform->getMid(i + 1)))));
 
             pPainter->setPen(highColor);
             pPainter->drawLine(QPoint(x, 0),
-                    QPoint(x, pWaveform->getHigh(i) + pWaveform->getHigh(i + 1)));
+                    QPoint(x,
+                            extent(band3.high(pWaveform->getHigh(i))) +
+                                    extent(band3.high(pWaveform->getHigh(i + 1)))));
         }
     } else { // stereo
         for (int i = startVal, x = startVal / 2; i < end; i += 2, ++x) {
             x = i / 2;
             pPainter->setPen(lowColor);
-            pPainter->drawLine(QPoint(x, -pWaveform->getLow(i)),
-                    QPoint(x, pWaveform->getLow(i + 1)));
+            pPainter->drawLine(
+                    QPoint(x, -extent(band3.low(pWaveform->getLow(i)))),
+                    QPoint(x, extent(band3.low(pWaveform->getLow(i + 1)))));
 
             pPainter->setPen(midColor);
-            pPainter->drawLine(QPoint(x, -pWaveform->getMid(i)),
-                    QPoint(x, pWaveform->getMid(i + 1)));
+            pPainter->drawLine(
+                    QPoint(x, -extent(band3.mid(pWaveform->getMid(i)))),
+                    QPoint(x, extent(band3.mid(pWaveform->getMid(i + 1)))));
 
             pPainter->setPen(highColor);
-            pPainter->drawLine(QPoint(x, -pWaveform->getHigh(i)),
-                    QPoint(x, pWaveform->getHigh(i + 1)));
+            pPainter->drawLine(
+                    QPoint(x, -extent(band3.high(pWaveform->getHigh(i)))),
+                    QPoint(x, extent(band3.high(pWaveform->getHigh(i + 1)))));
         }
     }
 

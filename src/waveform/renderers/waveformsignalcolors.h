@@ -4,6 +4,7 @@
 #include <QDomNode>
 
 #include "skin/legacy/skincontext.h"
+#include "waveform/renderers/waveformband3.h"
 
 class WaveformSignalColors {
   public:
@@ -60,6 +61,9 @@ class WaveformSignalColors {
     inline const QColor& getBgColor() const {
         return m_bgColor;
     }
+    inline const WaveformBand3& getBand3() const {
+        return m_band3;
+    }
     inline int getDimBrightThreshold() const {
         return m_dimBrightThreshold;
     }
@@ -87,5 +91,6 @@ class WaveformSignalColors {
     QColor m_passthroughOverlayColor;
     QColor m_passthroughLabelColor;
     QColor m_bgColor;
+    WaveformBand3 m_band3;
     int m_dimBrightThreshold;
 };

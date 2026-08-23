@@ -48,6 +48,19 @@ bool WaveformSignalColors::setup(const QDomNode &node, const SkinContext& contex
     }
     m_rgbHighColor = WSkinColor::getCorrectColor(m_rgbHighColor).toRgb();
 
+    // The three-band mix has its own base colours, and falls back to the RGB
+    // colours above when the skin does not name them.
+    QColor band3Low = QColor(context.selectString(node, "Signal3BandLowColor"));
+    band3Low = band3Low.isValid() ? WSkinColor::getCorrectColor(band3Low).toRgb()
+                                  : m_rgbLowColor;
+    QColor band3Mid = QColor(context.selectString(node, "Signal3BandMidColor"));
+    band3Mid = band3Mid.isValid() ? WSkinColor::getCorrectColor(band3Mid).toRgb()
+                                  : m_rgbMidColor;
+    QColor band3High = QColor(context.selectString(node, "Signal3BandHighColor"));
+    band3High = band3High.isValid() ? WSkinColor::getCorrectColor(band3High).toRgb()
+                                    : m_rgbHighColor;
+    m_band3.setup(node, context, band3Low, band3Mid, band3High);
+
     // filtered colors
     m_rgbLowFilteredColor = QColor(context.selectString(node, "SignalRGBLowFilteredColor"));
     if (!m_rgbLowFilteredColor.isValid()) {

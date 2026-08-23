@@ -5,6 +5,7 @@
 #include "track/track.h"
 #include "util/colorcomponents.h"
 #include "util/math.h"
+#include "waveform/renderers/waveformsignalcolors.h"
 #include "waveform/renderers/waveformwidgetrenderer.h"
 #include "waveform/waveform.h"
 
@@ -118,15 +119,16 @@ bool WaveformRendererRGB::preprocessInner() {
     const float heightFactor[2] = {-heightFactorAbs, heightFactorAbs};
     const bool splitLeftRight = m_options & WaveformRendererSignalBase::Option::SplitStereoSignal;
 
-    const float low_r = static_cast<float>(m_rgbLowColor_r);
-    const float mid_r = static_cast<float>(m_rgbMidColor_r);
-    const float high_r = static_cast<float>(m_rgbHighColor_r);
-    const float low_g = static_cast<float>(m_rgbLowColor_g);
-    const float mid_g = static_cast<float>(m_rgbMidColor_g);
-    const float high_g = static_cast<float>(m_rgbHighColor_g);
-    const float low_b = static_cast<float>(m_rgbLowColor_b);
-    const float mid_b = static_cast<float>(m_rgbMidColor_b);
-    const float high_b = static_cast<float>(m_rgbHighColor_b);
+    // Colours, per-band gain and curve, mix mode and height rule all come
+    // from the skin's signal-colour block. Its defaults are what this renderer
+    // did before: additive mix normalised to full brightness, height from
+    // filtered.all.
+    const WaveformSignalColors* pColors =
+            m_waveformRenderer->getWaveformSignalColors();
+    if (!pColors) {
+        return false;
+    }
+    const WaveformBand3& band3 = pColors->getBand3();
 
     // Effective visual frame for x
     double xVisualFrame = qRound(firstVisualFrame / visualIncrementPerPixel) *
@@ -194,10 +196,12 @@ bool WaveformRendererRGB::preprocessInner() {
         for (int chn = 0;
                 chn < (splitLeftRight && !m_isSlipRenderer ? 2 : 1);
                 chn++) {
-            // Cast to float
-            float maxLowU = static_cast<float>(u8maxLow[chn]);
-            float maxMidU = static_cast<float>(u8maxMid[chn]);
-            float maxHighU = static_cast<float>(u8maxHigh[chn]);
+            // Through the per-band gain and curve on the way out of the byte.
+            // 1.0 is full scale from here on, where it used to be 255. eqGain
+            // below is a ratio of these to themselves, so it is unaffected.
+            float maxLowU = band3.low(u8maxLow[chn]);
+            float maxMidU = band3.mid(u8maxMid[chn]);
+            float maxHighU = band3.high(u8maxHigh[chn]);
 
             // Apply the gains
             float maxLow = maxLowU * lowGain;
@@ -210,37 +214,27 @@ bool WaveformRendererRGB::preprocessInner() {
                 eqGain = (maxLow + maxMid + maxHigh) / allUnscaled;
             }
 
-            // Use the gained maxLow, maxMid and maxHigh values to calculate the color components
-            float red = maxLow * low_r + maxMid * mid_r + maxHigh * high_r;
-            float green = maxLow * low_g + maxMid * mid_g + maxHigh * high_g;
-            float blue = maxLow * low_b + maxMid * mid_b + maxHigh * high_b;
+            float red, green, blue;
+            band3.color(maxLow, maxMid, maxHigh, &red, &green, &blue);
 
-            // Normalize the color components using the maximum of the three
-            const float maxComponent = math_max3(red, green, blue);
-            if (maxComponent == 0.f) {
-                // Avoid division by 0
-                red = 0.f;
-                green = 0.f;
-                blue = 0.f;
-            } else {
-                const float normFactor = 1.f / maxComponent;
-                red *= normFactor;
-                green *= normFactor;
-                blue *= normFactor;
-            }
+            // 2.6 inlines the column height into the addRectangle calls below,
+            // so hoist it here: either the bands decide it or the separately
+            // stored overall level does, as before. The * m_maxValue puts it
+            // back into the byte units heightFactorAbs divides by.
+            const float columnHeight = band3.heightFromBands()
+                    ? band3.bandHeight(maxLow, maxMid, maxHigh) * m_maxValue
+                    : eqGain * maxAllChn[chn];
 
             // Lines are thin rectangles
             if (!splitLeftRight) {
                 vertexUpdater.addRectangle(
                         {fpos - halfPixelSize,
                                 halfBreadth -
-                                        heightFactorAbs * eqGain *
-                                                maxAllChn[chn]},
+                                        heightFactorAbs * columnHeight},
                         {fpos + halfPixelSize,
                                 m_isSlipRenderer ? halfBreadth
                                                  : halfBreadth +
-                                                heightFactorAbs * eqGain *
-                                                        maxAllChn[chn]},
+                                                heightFactorAbs * columnHeight},
                         {red, green, blue});
             } else {
                 // note: heightFactor is the same for left and right,
@@ -248,7 +242,7 @@ bool WaveformRendererRGB::preprocessInner() {
                 vertexUpdater.addRectangle({fpos - halfPixelSize,
                                                    halfBreadth},
                         {fpos + halfPixelSize,
-                                halfBreadth + heightFactor[chn] * eqGain * maxAllChn[chn]},
+                                halfBreadth + heightFactor[chn] * columnHeight},
                         {red,
                                 green,
                                 blue});
