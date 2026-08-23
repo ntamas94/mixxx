@@ -113,6 +113,13 @@ class SoundManager : public QObject {
     void outputRegistered(const AudioOutput& output, AudioSource* src);
     void inputRegistered(const AudioInput& input, AudioDestination* dest);
 
+  public slots:
+    // Reopen every configured sound device. Bound to
+    // [SoundManager],reopen_devices so the jog bridge can ask Mixxx to
+    // recover after the controller -- which is also the sound card --
+    // has been unplugged and replugged.
+    void slotReopenDevices(double value);
+
   private:
     // Closes all the devices and empties the list of devices we have.
     void clearDeviceList(bool sleepAfterClosing);
@@ -141,6 +148,7 @@ class SoundManager : public QObject {
     QHash<AudioOutput, AudioSource*> m_registeredSources;
     QMultiHash<AudioInput, AudioDestination*> m_registeredDestinations;
     ControlObject* m_pControlObjectSoundStatusCO;
+    ControlObject* m_pControlObjectReopenCO;
     ControlObject* m_pControlObjectVinylControlGainCO;
 
     QSharedPointer<EngineNetworkStream> m_pNetworkStream;

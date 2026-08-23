@@ -66,6 +66,13 @@ SoundManager::SoundManager(UserSettingsPointer pConfig,
     m_pControlObjectVinylControlGainCO = new ControlObject(
             ConfigKey(VINYL_PREF_KEY, "gain"));
 
+    m_pControlObjectReopenCO = new ControlObject(
+            ConfigKey("[SoundManager]", "reopen_devices"));
+    connect(m_pControlObjectReopenCO,
+            &ControlObject::valueChanged,
+            this,
+            &SoundManager::slotReopenDevices);
+
     //Hack because PortAudio samplerate enumeration is slow as hell on Linux (ALSA dmix sucks, so we can't blame PortAudio)
     m_samplerates.push_back(mixxx::audio::SampleRate(44100));
     m_samplerates.push_back(mixxx::audio::SampleRate(48000));
@@ -100,6 +107,7 @@ SoundManager::~SoundManager() {
 
     delete m_pControlObjectSoundStatusCO;
     delete m_pControlObjectVinylControlGainCO;
+    delete m_pControlObjectReopenCO;
 }
 
 QList<SoundDevicePointer> SoundManager::getDeviceList(
@@ -319,6 +327,16 @@ void SoundManager::queryDevicesMixxx() {
     auto currentDevice = SoundDevicePointer(new SoundDeviceNetwork(
             m_pConfig, this, m_pNetworkStream));
     m_devices.append(currentDevice);
+}
+
+void SoundManager::slotReopenDevices(double value) {
+    if (value <= 0) {
+        return;
+    }
+    // The device list is stale after a re-enumeration, so ask PortAudio
+    // again before trying to open anything.
+    clearAndQueryDevices();
+    setupDevices();
 }
 
 SoundDeviceStatus SoundManager::setupDevices() {
