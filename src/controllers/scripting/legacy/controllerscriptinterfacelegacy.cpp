@@ -26,6 +26,16 @@ constexpr int kScratchTimerMs = 1;
 constexpr double kAlphaBetaDt = kScratchTimerMs / 1000.0;
 // stop ramping at a rate which doesn't produce any audible output anymore
 constexpr double kBrakeRampToRate = 0.01;
+// How fast the running estimate of the scratch timer's real period
+// follows it: an EWMA at this weight per firing, so about seventy
+// milliseconds. It is meant to be slow. The instantaneous window is
+// the wrong divisor -- the comment in scratchProcess says why -- and
+// the whole value of the estimate is that it is nearly constant while
+// the thing it divides is not.
+constexpr double kScratchDtSmoothing = 1.0 / 64;
+// A sample longer than this is not a period. It is a stall, or a
+// timer that was only just started, and it is clamped on the way in.
+constexpr double kMaxScratchDt = 0.020;
 } // namespace
 
 ControllerScriptInterfaceLegacy::ControllerScriptInterfaceLegacy(
@@ -35,6 +45,8 @@ ControllerScriptInterfaceLegacy::ControllerScriptInterfaceLegacy(
     // Pre-allocate arrays for average number of virtual decks
     m_intervalAccumulator.resize(kDecks);
     m_lastMovement.resize(kDecks);
+    m_lastScratchProcess.resize(kDecks);
+    m_meanScratchDt.resize(kDecks);
     m_dx.resize(kDecks);
     m_rampTo.resize(kDecks);
     m_ramp.resize(kDecks);
@@ -46,6 +58,7 @@ ControllerScriptInterfaceLegacy::ControllerScriptInterfaceLegacy(
     // Initialize arrays used for testing and pointers
     for (int i = 0; i < kDecks; ++i) {
         m_dx[i] = 0.0;
+        m_meanScratchDt[i] = kAlphaBetaDt;
         m_scratchFilters[i] = new AlphaBetaFilter();
         m_ramp[i] = false;
         m_brakeActive[i] = false;
@@ -701,6 +714,7 @@ void ControllerScriptInterfaceLegacy::scratchEnable(int deck,
 
     m_dx[deck] = 1.0 / intervalsPerSecond;
     m_intervalAccumulator[deck] = 0.0;
+    m_lastScratchProcess[deck] = mixxx::Time::elapsed();
     m_ramp[deck] = false;
     m_rampFactor[deck] = 0.001;
     m_brakeActive[deck] = false;
@@ -775,6 +789,39 @@ void ControllerScriptInterfaceLegacy::scratchProcess(int timerId) {
     const double oldRate = filter->predictedVelocity();
 #endif
 
+    // What the timer's period really is, kept as a running mean.
+    //
+    // The filter was told kAlphaBetaDt at init and divides by it to turn
+    // a distance into a velocity, but the window is whatever
+    // startTimer(kScratchTimerMs) delivered, and that is a request the
+    // scheduler answers when it can. A bare Qt event loop on a Raspberry
+    // Pi 4 gives 1.06 ms of it idle; inside Mixxx, where the same loop
+    // also parses the wheel's 1 kHz MIDI and runs the mapping's JS, it
+    // is 1.15 ms idle and 1.20 ms with three cores busy. That overrun is
+    // ticks divided by time that never passed, and the deck travels too
+    // far by exactly the ratio, at any platter speed.
+    //
+    // The mean of it, and not the window that has just elapsed. Dividing
+    // by that would be right only if the ticks in it had arrived in
+    // proportion to its length, and they do not: they arrive when this
+    // thread next gets round to its MIDI, in batches, while the timer's
+    // own gaps include the five microsecond double-fires Qt produces for
+    // half a percent of firings. A batch divided by a five microsecond
+    // window is a velocity spike, and what the filter then averages is
+    // E[dx/T], which Jensen puts above the E[dx]/E[T] that is wanted. It
+    // was built that way first and measured: 1.3574 times as far as the
+    // ticks were worth, against 1.1502 for leaving it alone.
+    const mixxx::Duration processTime = mixxx::Time::elapsed();
+    const double realDt =
+            (processTime - m_lastScratchProcess[deck]).toDoubleSeconds();
+    m_lastScratchProcess[deck] = processTime;
+    if (realDt > 0.0) {
+        const double sample =
+                realDt < kMaxScratchDt ? realDt : kMaxScratchDt;
+        m_meanScratchDt[deck] +=
+                (sample - m_meanScratchDt[deck]) * kScratchDtSmoothing;
+    }
+
     // Give the filter a data point:
 
     // If we're ramping to end scratching and the wheel hasn't been turned very
@@ -800,7 +847,13 @@ void ControllerScriptInterfaceLegacy::scratchProcess(int timerId) {
 #endif
         // This will (and should) be 0 if no net ticks have been accumulated
         // (i.e. the wheel is stopped)
-        filter->observation(m_dx[deck] * m_intervalAccumulator[deck]);
+        //
+        // Scaled into the window the filter believes in. This is the only
+        // branch that measures anything: the two above feed it a target
+        // rate already expressed against kAlphaBetaDt, which means the
+        // same thing however long the window was, so they are left alone.
+        filter->observation(m_dx[deck] * m_intervalAccumulator[deck] *
+                (kAlphaBetaDt / m_meanScratchDt[deck]));
     }
 
     const double newRate = filter->predictedVelocity();
@@ -962,6 +1015,7 @@ void ControllerScriptInterfaceLegacy::brake(int deck, bool activate, double fact
     stopScratchTimer(timerId);
 
     // setup timer and set scratch2
+    m_lastScratchProcess[deck] = mixxx::Time::elapsed();
     timerId = startTimer(kScratchTimerMs);
     m_scratchTimers[timerId] = deck;
 
@@ -1025,6 +1079,7 @@ void ControllerScriptInterfaceLegacy::softStart(int deck, bool activate, double 
     }
 
     // setup timer, start playing and set scratch2
+    m_lastScratchProcess[deck] = mixxx::Time::elapsed();
     timerId = startTimer(kScratchTimerMs);
     m_scratchTimers[timerId] = deck;
 

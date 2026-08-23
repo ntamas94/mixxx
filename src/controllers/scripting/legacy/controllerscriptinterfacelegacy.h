@@ -141,6 +141,14 @@ class ControllerScriptInterfaceLegacy : public QObject {
 
     QVarLengthArray<int> m_intervalAccumulator;
     QVarLengthArray<mixxx::Duration> m_lastMovement;
+    // When scratchProcess() last ran for each deck, so the window it
+    // hands the filter can be measured rather than assumed.
+    QVarLengthArray<mixxx::Duration> m_lastScratchProcess;
+    // A running mean of what that timer's period really is. Never
+    // reset: the scheduler does not change when a hand leaves the
+    // platter, so the next gesture starts from an estimate that is
+    // already right.
+    QVarLengthArray<double> m_meanScratchDt;
     QVarLengthArray<double> m_dx, m_rampTo, m_rampFactor;
     QVarLengthArray<bool> m_ramp, m_brakeActive, m_spinbackActive, m_softStartActive;
     QVarLengthArray<AlphaBetaFilter*> m_scratchFilters;
