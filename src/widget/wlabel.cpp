@@ -1,5 +1,7 @@
 #include "widget/wlabel.h"
 
+#include <QPainter>
+
 #include <QEvent>
 #include <QFont>
 
@@ -82,6 +84,37 @@ void WLabel::setup(const QDomNode& node, const SkinContext& context) {
             m_elideMode = Qt::ElideLeft;
         } else if (elide == "none") {
             m_elideMode = Qt::ElideNone;
+        } else if (elide == "scroll") {
+            // Marquee: bounce overflowing text instead of cutting it off.
+            m_scrollMode = true;
+            m_elideMode = Qt::ElideNone;
+            if (m_pScrollTimer == nullptr) {
+                m_pScrollTimer = new QTimer(this);
+                m_pScrollTimer->setInterval(40);
+                connect(m_pScrollTimer, &QTimer::timeout, this, [this] {
+                    if (m_scrollHold > 0) {
+                        m_scrollHold--;
+                        return;
+                    }
+                    QFontMetrics metrics(font());
+                    int overflow = metrics.size(0, m_longText).width() +
+                            2 * frameWidth() - width();
+                    if (overflow <= 0) {
+                        return;
+                    }
+                    m_scrollPos += m_scrollDir * 1.0;
+                    if (m_scrollPos >= overflow) {
+                        m_scrollPos = overflow;
+                        m_scrollDir = -1;
+                        m_scrollHold = 25; // ~1 s pause at each end
+                    } else if (m_scrollPos <= 0) {
+                        m_scrollPos = 0;
+                        m_scrollDir = 1;
+                        m_scrollHold = 25;
+                    }
+                    update();
+                });
+            }
         } else {
             qDebug() << "WLabel::setup(): Elide =" << elide <<
                     "unknown, use right, middle, left or none.";
@@ -95,6 +128,25 @@ QString WLabel::text() const {
 
 void WLabel::setText(const QString& text) {
     m_longText = text;
+    if (m_scrollMode) {
+        m_scrollPos = 0;
+        m_scrollDir = 1;
+        m_scrollHold = 25;
+        QFontMetrics metrics(font());
+        bool overflow = metrics.size(0, m_longText).width() +
+                2 * frameWidth() > width();
+        if (overflow) {
+            if (m_pScrollTimer != nullptr) {
+                m_pScrollTimer->start();
+            }
+        } else if (m_pScrollTimer != nullptr) {
+            m_pScrollTimer->stop();
+        }
+        // Keep QLabel's own text empty; paintEvent draws the marquee.
+        QLabel::setText(QString());
+        update();
+        return;
+    }
     if (m_elideMode != Qt::ElideNone) {
         QFontMetrics metrics(font());
         // Measure the text for the optimum label width
@@ -157,4 +209,31 @@ QSize WLabel::sizeHint() const {
         size.setWidth(m_widthHint);
     }
     return size;
+}
+
+void WLabel::paintEvent(QPaintEvent* pEvent) {
+    if (!m_scrollMode) {
+        QLabel::paintEvent(pEvent);
+        return;
+    }
+    QPainter painter(this);
+    // Follow the stylesheet color; the default pen is not guaranteed to.
+    painter.setPen(m_scrollColor);
+    QFontMetrics metrics(font());
+    int textWidth = metrics.size(0, m_longText).width();
+    QRect content = contentsRect();
+    int y = content.y() + (content.height() + metrics.ascent() - metrics.descent()) / 2;
+    int x = content.x();
+    if (textWidth <= content.width()) {
+        // Fits: honour the label alignment, no scrolling.
+        if (alignment() & Qt::AlignHCenter) {
+            x += (content.width() - textWidth) / 2;
+        } else if (alignment() & Qt::AlignRight) {
+            x += content.width() - textWidth;
+        }
+    } else {
+        x -= static_cast<int>(m_scrollPos);
+    }
+    painter.setClipRect(content);
+    painter.drawText(QPoint(x, y), m_longText);
 }
