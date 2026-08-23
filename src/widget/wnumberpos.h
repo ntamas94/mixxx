@@ -12,6 +12,11 @@ class WNumberPos : public WNumber {
   public:
     explicit WNumberPos(const QString& group, QWidget* parent = nullptr);
 
+    // Use a custom control for the display mode instead of the global
+    // [Controls],ShowDurationRemaining. The widget then toggles only
+    // between ELAPSED and REMAINING on click (two-state).
+    void setDisplayModeControl(const QString& group, const QString& key);
+
   protected:
     void mousePressEvent(QMouseEvent* pEvent) override;
 
@@ -27,6 +32,7 @@ class WNumberPos : public WNumber {
     TrackTime::DisplayMode m_displayMode;
     TrackTime::DisplayFormat m_displayFormat;
 
+    bool m_bTwoStateCustom = false;
     double m_dOldTimeElapsed;
     ControlProxy* m_pTimeElapsed;
     ControlProxy* m_pTimeRemaining;

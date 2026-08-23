@@ -30,8 +30,30 @@ WNumberPos::WNumberPos(const QString& group, QWidget* parent)
     slotSetTimeFormat(m_pTimeFormat->get());
 }
 
+void WNumberPos::setDisplayModeControl(const QString& group, const QString& key) {
+    delete m_pShowTrackTimeRemaining;
+    m_pShowTrackTimeRemaining = new ControlProxy(
+            group, key, this, ControlFlag::NoAssertIfMissing);
+    m_pShowTrackTimeRemaining->connectValueChanged(
+            this, &WNumberPos::slotSetDisplayMode);
+    m_bTwoStateCustom = true;
+    slotSetDisplayMode(m_pShowTrackTimeRemaining->get());
+}
+
 void WNumberPos::mousePressEvent(QMouseEvent* pEvent) {
     bool leftClick = pEvent->buttons() & Qt::LeftButton;
+
+    if (leftClick && m_bTwoStateCustom) {
+        // Per-deck two-state toggle: ELAPSED <-> REMAINING
+        if (m_displayMode == TrackTime::DisplayMode::REMAINING) {
+            m_displayMode = TrackTime::DisplayMode::ELAPSED;
+        } else {
+            m_displayMode = TrackTime::DisplayMode::REMAINING;
+        }
+        m_pShowTrackTimeRemaining->set(static_cast<double>(m_displayMode));
+        slotSetTimeElapsed(m_dOldTimeElapsed);
+        return;
+    }
 
     if (leftClick) {
         // Cycle through display modes

@@ -1330,6 +1330,11 @@ QWidget* LegacySkinParser::parseNumberRate(const QDomElement& node) {
 QWidget* LegacySkinParser::parseNumberPos(const QDomElement& node) {
     QString group = lookupNodeGroup(node);
     WNumberPos* p = new WNumberPos(group, m_pParent);
+    QString modeKey = m_pContext->selectString(node, "ModeConfigKey");
+    if (!modeKey.isEmpty()) {
+        ConfigKey modeConfigKey = ConfigKey::parseCommaSeparated(modeKey);
+        p->setDisplayModeControl(modeConfigKey.group, modeConfigKey.item);
+    }
     setupLabelWidget(node, p);
     return p;
 }
