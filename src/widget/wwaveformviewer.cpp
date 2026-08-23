@@ -56,11 +56,24 @@ void WWaveformViewer::setup(const QDomNode& node, const SkinContext& context) {
 
 void WWaveformViewer::resizeEvent(QResizeEvent* event) {
     Q_UNUSED(event);
+    // Stagger the GL framebuffer rebuilds: resizing several viewers in the
+    // same frame wedges the Pi v3d GPU (MMU faults, endless hang-resets).
+    // Each deck waits its own slot, so only one GL surface rebuilds at a time.
+    if (m_pResizeTimer == nullptr) {
+        m_pResizeTimer = new QTimer(this);
+        m_pResizeTimer->setSingleShot(true);
+        connect(m_pResizeTimer, &QTimer::timeout, this, &WWaveformViewer::applyPendingResize);
+    }
+    int deck = 1;
+    const QChar last = m_group.isEmpty() ? QChar('1') : m_group.at(m_group.size() - 2);
+    if (last.isDigit()) {
+        deck = last.digitValue();
+    }
+    m_pResizeTimer->start(80 + (deck - 1) * 160);
+}
+
+void WWaveformViewer::applyPendingResize() {
     if (m_waveformWidget) {
-        // Note m_waveformWidget is a WaveformWidgetAbstract,
-        // so this calls the method of WaveformWidgetAbstract,
-        // note of the derived waveform widgets which are also
-        // a QWidget, though that will be called directly.
         m_waveformWidget->resize(width(), height());
     }
 }

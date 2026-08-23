@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QTimer>
+
 #include "track/track_decl.h"
 #include "util/parented_ptr.h"
 #include "waveform/renderers/waveformmark.h"
@@ -52,6 +54,7 @@ class WWaveformViewer : public WWidget, public TrackDropTarget {
   protected:
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void applyPendingResize();
     void wheelEvent(QWheelEvent *event) override;
 
   private slots:
@@ -69,6 +72,7 @@ class WWaveformViewer : public WWidget, public TrackDropTarget {
 
   private:
     const QString m_group;
+    QTimer* m_pResizeTimer{nullptr};
     UserSettingsPointer m_pConfig;
     int m_zoomZoneWidth;
     ControlProxy* m_pZoom;
