@@ -37,7 +37,12 @@ class WTrackWidgetGroup : public WWidgetGroup, public TrackDropTarget {
 
   private:
     void dragEnterEvent(QDragEnterEvent* event) override;
+    void childEvent(QChildEvent* pEvent) override;
+    bool eventFilter(QObject* pObj, QEvent* pEvent) override;
+    void watchDescendants(QObject* pRoot);
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    void setDropHover(bool hover);
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
 

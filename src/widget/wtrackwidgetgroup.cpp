@@ -1,5 +1,9 @@
 #include "widget/wtrackwidgetgroup.h"
 
+#include <QChildEvent>
+
+#include <QStyle>
+
 #include <QStylePainter>
 
 #include "control/controlobject.h"
@@ -103,11 +107,87 @@ void WTrackWidgetGroup::mouseMoveEvent(QMouseEvent* pEvent) {
     }
 }
 
+void WTrackWidgetGroup::setDropHover(bool hover) {
+    // QSS has no drag-hover pseudo-state; expose one as a dynamic property so
+    // the skin can highlight the card a track is about to drop onto:
+    //   TrackWidgetGroup[dropHover="true"] { border: 2px solid #f2d13c; }
+    if (property("dropHover").toBool() == hover) {
+        return;
+    }
+    setProperty("dropHover", hover);
+    style()->unpolish(this);
+    style()->polish(this);
+    update();
+}
+
+void WTrackWidgetGroup::childEvent(QChildEvent* pEvent) {
+    WWidgetGroup::childEvent(pEvent);
+    if (pEvent->added()) {
+        watchDescendants(pEvent->child());
+    }
+}
+
+void WTrackWidgetGroup::watchDescendants(QObject* pRoot) {
+    // The card children (overview, labels) swallow drag events, so the
+    // group alone only sees drags over its bare strips. Filter the whole
+    // subtree so hover and drop cover the entire card area.
+    pRoot->installEventFilter(this);
+    const QObjectList& children = pRoot->children();
+    for (QObject* pChild : children) {
+        watchDescendants(pChild);
+    }
+}
+
+bool WTrackWidgetGroup::eventFilter(QObject* pObj, QEvent* pEvent) {
+    switch (pEvent->type()) {
+    case QEvent::ChildAdded: {
+        // Descendants are built after their parent is added, so cascade the
+        // filter onto every new node to cover the whole card subtree.
+        QChildEvent* pChild = static_cast<QChildEvent*>(pEvent);
+        watchDescendants(pChild->child());
+        break;
+    }
+    case QEvent::DragEnter: {
+        QDragEnterEvent* pDrag = static_cast<QDragEnterEvent*>(pEvent);
+        DragAndDropHelper::handleTrackDragEnterEvent(pDrag, m_group, m_pConfig);
+        if (pDrag->isAccepted()) {
+            setDropHover(true);
+            return true;
+        }
+        break;
+    }
+    case QEvent::DragLeave:
+        setDropHover(false);
+        break;
+    case QEvent::Drop: {
+        setDropHover(false);
+        QDropEvent* pDrop = static_cast<QDropEvent*>(pEvent);
+        DragAndDropHelper::handleTrackDropEvent(pDrop, *this, m_group, m_pConfig);
+        if (pDrop->isAccepted()) {
+            return true;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    return WWidgetGroup::eventFilter(pObj, pEvent);
+}
+
 void WTrackWidgetGroup::dragEnterEvent(QDragEnterEvent* pEvent) {
     DragAndDropHelper::handleTrackDragEnterEvent(pEvent, m_group, m_pConfig);
+    if (pEvent->isAccepted()) {
+        setDropHover(true);
+    }
+}
+
+void WTrackWidgetGroup::dragLeaveEvent(QDragLeaveEvent* pEvent) {
+    Q_UNUSED(pEvent);
+    setDropHover(false);
 }
 
 void WTrackWidgetGroup::dropEvent(QDropEvent* pEvent) {
+    setDropHover(false);
     DragAndDropHelper::handleTrackDropEvent(pEvent, *this, m_group, m_pConfig);
 }
 
